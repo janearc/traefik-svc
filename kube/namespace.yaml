@@ -1,0 +1,18 @@
+# The namespace every migrated fleet service lives in.
+#
+# traefik's ingress controller itself does NOT live here: k3s runs its bundled
+# traefik in kube-system (see helmchartconfig.yaml for why we reuse that one
+# rather than running a second copy). This namespace holds the application
+# workloads and the per-service IngressRoute objects that attach them to the
+# shared edge.
+#
+# Created here (not assumed) so `kubectl apply -k kube/` from a clean cluster
+# brings the namespace up before anything that targets it. Applying it twice is
+# harmless — apply is idempotent on a Namespace.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: fleet
+  labels:
+    app.kubernetes.io/name: fleet
+    app.kubernetes.io/part-of: fleet

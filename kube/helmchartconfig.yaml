@@ -1,0 +1,92 @@
+# Fleet ingress = k3s's BUNDLED traefik. We do not deploy a second traefik.
+#
+# Decision (option a of the handoff task): use the traefik that k3s already
+# installs as its ingress controller, and shape it with this overlay, rather
+# than authoring our own traefik Deployment + CRDs + RBAC (option b).
+#
+# Why reuse the bundle:
+#   - k3s installs traefik (v3 on k3s v1.35.x) into kube-system as a managed
+#     HelmChart, with the IngressRoute / Middleware / TLSOption CRDs and the
+#     controller's RBAC already in place. That is one running edge.
+#   - The contract keeps a SINGLE ingress: cloudflared -> traefik -> services.
+#     A second traefik Deployment would be a second edge competing for the same
+#     role and the same host port (:80) — the exact thing the one-ingress model
+#     exists to avoid. So we keep k3s's traefik and route everything through it.
+#   - Everything the compose traefik did is reachable from the bundle: the `web`
+#     entrypoint on :80, file/label-style routing now expressed as IngressRoute
+#     CRDs, and the dashboard. Nothing here needs a config the bundle can't give,
+#     so option b would be cost without benefit.
+#
+# HOW THIS WORKS: k3s reconciles its add-ons from manifests it watches inside
+# the server. A HelmChartConfig named `traefik` in `kube-system` is MERGED onto
+# the values of the bundled `traefik` HelmChart of the same name — it customizes
+# the existing release in place. (k3s, not this repo, owns the base HelmChart;
+# we only supply the overlay. Editing k3s's own add-on manifest would be editing
+# upstream, which we do not do.)
+#
+# APPLYING THIS IS A kube-system CHANGE, so it is deliberately the PRIMARY
+# AGENT's gated step, run once when the cluster is stood up — not part of the
+# `fleet`-namespace service apply loop. It is kept out of kustomization.yaml for
+# that reason (see NOTES.md). It is here, version-controlled and validated, so
+# the cluster's ingress config is reviewable rather than a hand-typed `helm`
+# flag nobody can find later.
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: traefik
+  # MUST be kube-system: that is where k3s's bundled traefik HelmChart lives, and
+  # the overlay only merges onto a HelmChart of the same name in the same
+  # namespace. A HelmChartConfig in `fleet` would match nothing.
+  namespace: kube-system
+spec:
+  # valuesContent is a YAML string merged onto the chart's default values. We set
+  # only what the fleet needs and let k3s's defaults stand for the rest, so a k3s
+  # upgrade that changes other defaults flows through untouched.
+  valuesContent: |-
+    # One replica. The fleet runs a single edge on a laptop; the connector in
+    # front (cloudflared) is also single. Scale this deliberately, not by reflex.
+    deployment:
+      replicas: 1
+    # Entrypoints. k3s already defines web (:80) and websecure (:443); we restate
+    # web explicitly because it is the one the fleet routes on and the one
+    # cloudflared forwards to, and being explicit keeps the contract visible in
+    # the manifest rather than implied by a chart default.
+    ports:
+      web:
+        port: 8000          # container port; k3s maps the :80 entrypoint to it
+        exposedPort: 80      # the entrypoint address services match `web` against
+        expose:
+          default: true
+        protocol: TCP
+      websecure:
+        expose:
+          default: true
+    # The dashboard/API. insecure=true mirrors the compose mesh (--api.insecure),
+    # which is acceptable because nothing reaches traefik except through
+    # cloudflared + Cloudflare Access; the dashboard is not publicly routed. If
+    # the edge posture tightens, turn this off and front the dashboard with an
+    # IngressRoute + auth Middleware instead.
+    api:
+      dashboard: true
+      insecure: true
+    # Watch the whole cluster for IngressRoute/Ingress objects, not just one
+    # namespace. Fleet services live in `fleet`; their IngressRoutes are picked
+    # up because the controller's providers are cluster-scoped here.
+    providers:
+      kubernetesCRD:
+        enabled: true
+        allowCrossNamespace: false   # routes reference Services in their own ns
+      kubernetesIngress:
+        enabled: true                # plain Ingress still works; CRD is preferred
+    # Keep the metrics endpoint the fleet already scrapes.
+    metrics:
+      prometheus:
+        entryPoint: metrics
+    # Modest footprint for a laptop edge.
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 300m
+        memory: 256Mi

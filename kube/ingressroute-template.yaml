@@ -1,0 +1,79 @@
+# ============================================================================
+# IngressRoute TEMPLATE — COPY THIS into each service's repo as
+# kube/ingressroute.yaml and replace every <PLACEHOLDER>. Do not apply this
+# file as-is; it routes a non-existent service. It is the shared shape so every
+# migrated service attaches to the one edge the same way.
+#
+# The model it preserves:   cloudflared  ->  traefik (k3s bundle)  ->  <service>
+# A request admitted by Cloudflare Access hits traefik's `web` entrypoint on :80;
+# traefik matches the Host rule below and forwards to the named Service:port.
+# Services do NOT get their own NodePort or hostPort — traefik is the only edge.
+#
+# This is the CRD form of what the compose mesh did with the dynamic file
+# provider (e.g. ~/var/traefik/dynamic/llms.yml: a Host(+PathPrefix) router
+# pointing at a backend). Same routing, expressed as a Kubernetes object the
+# bundled traefik watches.
+# ============================================================================
+apiVersion: traefik.io/v1alpha1   # traefik v3 CRD group. NOT traefik.containo.us
+                                  # (that was v2). k3s v1.35.x ships v3.
+kind: IngressRoute
+metadata:
+  # Convention: name it after the service. Keeps `kubectl get ingressroute -n
+  # fleet` readable and avoids collisions when many services share the namespace.
+  name: <SERVICE>            # e.g. obs-svc
+  namespace: fleet           # every fleet object lives here; the Service this
+                             # route targets must be in this namespace too
+                             # (allowCrossNamespace is off — see helmchartconfig).
+  labels:
+    app.kubernetes.io/name: <SERVICE>
+    app.kubernetes.io/part-of: fleet
+spec:
+  # Match only the plain HTTP entrypoint. TLS is terminated at Cloudflare's edge;
+  # the tunnel forwards cleartext to traefik inside the cluster, so `web` (:80) is
+  # the right and only entrypoint for fleet routes. Do not add `websecure` unless
+  # a service genuinely terminates its own TLS inside the cluster.
+  entryPoints:
+    - web
+  routes:
+    # One route = one host (optionally narrowed by path). Add more list items for
+    # more hostnames/paths on the same service.
+    - kind: Rule
+      # Host-based routing is the fleet default: a public hostname maps to a
+      # service. Examples that match the existing mesh:
+      #   Host(`obs.local`)
+      #   Host(`models.local`) && PathPrefix(`/llms/ollama/`)   # path-scoped
+      # Use the hostname Cloudflare Access fronts for this service. Keep it off
+      # the apex the dashboard/other services use unless you mean to share it.
+      match: Host(`<SERVICE>.local`)
+      services:
+        # The in-cluster Service this route forwards to. `name` is the metadata
+        # name of the service's kube/service.yaml; `port` is the Service port
+        # (the published port, not necessarily the container's targetPort).
+        - kind: Service
+          name: <SERVICE>      # must match the Service object's metadata.name
+          port: <PORT>         # the Service's spec.ports[].port, e.g. 8080
+          # passHostHeader keeps the original Host so the backend sees the public
+          # hostname (matches the compose default). Leave on unless a backend
+          # needs traefik's own host.
+          passHostHeader: true
+
+      # --- OPTIONAL: middlewares ---------------------------------------------
+      # Attach cross-cutting behavior (auth, headers, stripprefix, ratelimit) by
+      # referencing Middleware CRDs in the same namespace. Define the Middleware
+      # in your service's kube/ and list it here. Example (strip a path prefix so
+      # the backend sees `/` while the public route is `/llms/ollama/`):
+      #
+      # middlewares:
+      #   - name: <SERVICE>-stripprefix
+      #
+      # The Middleware object would live alongside this route:
+      #
+      #   apiVersion: traefik.io/v1alpha1
+      #   kind: Middleware
+      #   metadata:
+      #     name: <SERVICE>-stripprefix
+      #     namespace: fleet
+      #   spec:
+      #     stripPrefix:
+      #       prefixes: ["/llms/ollama"]
+      # -----------------------------------------------------------------------

@@ -1,0 +1,27 @@
+# Ingress foundation for the fleet cluster.
+#
+# This kustomization is the bring-up of the SHARED edge, not of any one service.
+# It contains exactly two things and deliberately omits two others:
+#
+#   included:
+#     - namespace.yaml        the `fleet` namespace services land in
+#     - helmchartconfig.yaml  the overlay that configures k3s's bundled traefik
+#                             (this is a kube-system object; see its header — it
+#                             is the primary agent's one-time gated step, kept
+#                             here so the edge config is reviewed and versioned)
+#
+#   intentionally NOT included:
+#     - ingressroute-template.yaml  it is a copy-me template with <PLACEHOLDER>s,
+#                                   not a deployable object; each service ships
+#                                   its OWN ingressroute.yaml in its own kube/.
+#     - any traefik Deployment/CRDs/RBAC  we reuse the k3s bundle, so there is
+#                                   nothing of our own to deploy (option a).
+#
+# Validate offline (no cluster, no apply) — see NOTES.md:
+#   kubectl kustomize kube/ | kubeconform -strict -ignore-missing-schemas
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - namespace.yaml
+  - helmchartconfig.yaml
