@@ -1,0 +1,11 @@
+# Traefik writes real TLS private keys to acme.json at runtime — never commit it.
+acme.json
+*.pem
+*.key
+certs/
+
+# local env / secrets
+.env
+*.env
+
+.DS_Store
