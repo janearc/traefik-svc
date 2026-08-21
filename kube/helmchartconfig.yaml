@@ -51,6 +51,24 @@ spec:
     # web explicitly because it is the one the fleet routes on and the one
     # cloudflared forwards to, and being explicit keeps the contract visible in
     # the manifest rather than implied by a chart default.
+    # PIN THE ClusterIP. kube/coredns-mesh.yaml answers every *.mesh name with
+    # this exact address, so it is not an implementation detail -- it is a
+    # constant two files depend on.
+    #
+    # Without this the chart lets Kubernetes allocate one. That survives pod
+    # restarts and reboots, but NOT a delete-and-recreate of the Service, which
+    # this very HelmChartConfig can cause: failurePolicy is reinstall. Applying
+    # this file unpinned could hand traefik a new address and take the whole
+    # .mesh TLD dark, with DNS still answering and nothing listening.
+    #
+    # 10.43.31.212 is the address traefik already holds, so pinning it is a
+    # no-op against the running Service. clusterIP is immutable after creation,
+    # which is exactly why it has to be declared before the next recreation
+    # rather than after.
+    service:
+      spec:
+        clusterIP: 10.43.31.212
+
     ports:
       web:
         port: 8000          # container port; k3s maps the :80 entrypoint to it
@@ -68,6 +86,19 @@ spec:
     # IngressRoute + auth Middleware instead.
     api:
       dashboard: true
+      # insecure: true, and this is the OPERATOR'S CALL rather than an
+      # inherited default -- ruled 2026-08-21 after being raised explicitly.
+      #
+      # Her reasoning, and it is correct: reaching this dashboard means
+      # authenticating to GitHub, then to Cloudflare, then supplying the team
+      # name, on a device enrolled to that team. That is her own credential
+      # chain, not a casual adversary surface. "Reachable through the tunnel"
+      # is not the same as "exposed", and treating it as such overweights the
+      # risk against a real loss of visibility.
+      #
+      # A secrets-dashboard-auth-plan branch exists for putting real auth in
+      # front of it. That remains worth doing; it is not a reason to run
+      # without the dashboard until then.
       insecure: true
     # Watch the whole cluster for IngressRoute/Ingress objects, not just one
     # namespace. Fleet services live in `fleet`; their IngressRoutes are picked

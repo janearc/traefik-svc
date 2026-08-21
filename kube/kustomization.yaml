@@ -1,7 +1,7 @@
 # Ingress foundation for the fleet cluster.
 #
 # This kustomization is the bring-up of the SHARED edge, not of any one service.
-# It contains exactly two things and deliberately omits two others:
+# It contains exactly three things and deliberately omits two others:
 #
 #   included:
 #     - namespace.yaml        the `fleet` namespace services land in
@@ -9,6 +9,14 @@
 #                             (this is a kube-system object; see its header — it
 #                             is the primary agent's one-time gated step, kept
 #                             here so the edge config is reviewed and versioned)
+#     - coredns-mesh.yaml     the .mesh private TLD. Host-based routing is only
+#                             usable if the names RESOLVE, so the resolver entry
+#                             and the router that reads the Host header are two
+#                             halves of one mechanism and belong together. Also
+#                             a kube-system object, here for the same reason as
+#                             the helmchartconfig: shared edge configuration,
+#                             owned by the routing layer rather than by any one
+#                             service's repo.
 #
 #   intentionally NOT included:
 #     - ingressroute-template.yaml  it is a copy-me template with <PLACEHOLDER>s,
@@ -25,3 +33,4 @@ kind: Kustomization
 resources:
   - namespace.yaml
   - helmchartconfig.yaml
+  - coredns-mesh.yaml
