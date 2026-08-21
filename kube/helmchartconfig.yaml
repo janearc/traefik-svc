@@ -86,7 +86,18 @@ spec:
     # IngressRoute + auth Middleware instead.
     api:
       dashboard: true
-      insecure: true
+      # insecure: false, and this is a CHANGE from what this file used to say.
+      #
+      # insecure: true serves the dashboard on the `traefik` entrypoint with NO
+      # authentication. The running traefik has api.dashboard=true and does NOT
+      # have insecure set -- so applying this file as written would not preserve
+      # the current posture, it would newly expose an unauthenticated dashboard
+      # on the cluster network, which the tunnel routes to enrolled devices.
+      #
+      # There is a secrets-dashboard-auth-plan branch in this repo, so the need
+      # for real auth was already recognised. Reaching the dashboard should wait
+      # for that rather than arrive as a side effect of setting a memory limit.
+      insecure: false
     # Watch the whole cluster for IngressRoute/Ingress objects, not just one
     # namespace. Fleet services live in `fleet`; their IngressRoutes are picked
     # up because the controller's providers are cluster-scoped here.
