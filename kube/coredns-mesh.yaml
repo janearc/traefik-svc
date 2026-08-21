@@ -1,0 +1,65 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: coredns-custom
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/part-of: fleet
+data:
+  # A private TLD for the estate, so nothing here needs an IP or a port.
+  #
+  # Every *.mesh name answers with traefik's ClusterIP, and traefik decides
+  # which service the request belongs to by reading the Host header. That is
+  # why this is a WILDCARD rather than a list: adding a service becomes an
+  # IngressRoute and nothing else, with no DNS change and no edit to this file.
+  # The same drop-in principle the front door uses for neighbours.
+  #
+  # .mesh is not a real TLD and that is deliberate -- it cannot collide with
+  # anything on the public internet, it resolves only for clients using this
+  # resolver (in-cluster, or a device on WARP with Local Domain Fallback
+  # pointing `mesh` at 10.43.0.10), and it puts no name for this estate into
+  # any public record. For an operator who is a harassment target, a private
+  # TLD is strictly better than a registered domain: there is nothing to look
+  # up and no certificate transparency trail.
+  #
+  # fallthrough matters: without it, a *.mesh miss would be answered
+  # authoritatively as NXDOMAIN instead of falling through to the rest of the
+  # chain.
+  mesh.server: |
+    mesh:53 {
+        errors
+        template IN A mesh {
+            match ".*\.mesh\.$"
+            # 10.43.31.212 is traefik's ClusterIP. It is DYNAMICALLY
+            # ALLOCATED and pinned in no manifest -- k3s installs traefik via
+            # a HelmChart and the address was assigned, not chosen. It survives
+            # pod restarts and reboots, but NOT a delete-and-recreate of the
+            # Service, and if that ever happens every *.mesh name will resolve
+            # to an address nothing is listening on. DNS will answer, traefik
+            # will not, and the failure will look like a routing problem rather
+            # than a stale constant.
+            #
+            # NOTE, and this is a live landmine: kube/helmchartconfig.yaml in
+            # THIS repo has never been applied (kubectl diff shows it absent
+            # from the cluster) and carries failurePolicy: reinstall. Applying
+            # it re-reconciles the traefik HelmChart, which can reassign this
+            # very address -- so the two files in this directory are in tension
+            # and nobody has hit it because neither has been applied.
+            #
+            # Whoever applies helmchartconfig.yaml FIRST: pin
+            # service.spec.clusterIP to the address below in the same change,
+            # or re-read the assigned ClusterIP afterwards and update this file.
+            # Doing one without the other takes the whole .mesh TLD dark.
+            #
+            # Pinning clusterIP on the traefik Service (via a HelmChartConfig)
+            # would remove the hazard. Until then, this line is a fact about
+            # the current cluster rather than a decision, and it is the first
+            # thing to check if the whole .mesh TLD goes dark at once.
+            answer "{{ .Name }} 60 IN A 10.43.31.212"
+            fallthrough
+        }
+        template IN AAAA mesh {
+            match ".*\.mesh\.$"
+            rcode NOERROR
+        }
+    }

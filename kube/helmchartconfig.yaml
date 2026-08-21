@@ -51,6 +51,24 @@ spec:
     # web explicitly because it is the one the fleet routes on and the one
     # cloudflared forwards to, and being explicit keeps the contract visible in
     # the manifest rather than implied by a chart default.
+    # PIN THE ClusterIP. kube/coredns-mesh.yaml answers every *.mesh name with
+    # this exact address, so it is not an implementation detail -- it is a
+    # constant two files depend on.
+    #
+    # Without this the chart lets Kubernetes allocate one. That survives pod
+    # restarts and reboots, but NOT a delete-and-recreate of the Service, which
+    # this very HelmChartConfig can cause: failurePolicy is reinstall. Applying
+    # this file unpinned could hand traefik a new address and take the whole
+    # .mesh TLD dark, with DNS still answering and nothing listening.
+    #
+    # 10.43.31.212 is the address traefik already holds, so pinning it is a
+    # no-op against the running Service. clusterIP is immutable after creation,
+    # which is exactly why it has to be declared before the next recreation
+    # rather than after.
+    service:
+      spec:
+        clusterIP: 10.43.31.212
+
     ports:
       web:
         port: 8000          # container port; k3s maps the :80 entrypoint to it
